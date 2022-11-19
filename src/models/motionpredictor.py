@@ -117,7 +117,7 @@ class MotionPredictor(nn.Module):
 		return encoder_inputs, decoder_inputs, decoder_outputs
 
 
-	def find_indices_srnn( self, data, action ):
+	def find_indices_srnn( self, data, action, subject ):
 		"""
 		Find the same action indices as in SRNN.
 		See https://github.com/asheshjain399/RNNexp/blob/master/structural_rnn/CRFProblems/H3.6m/processdata.py#L325
@@ -127,7 +127,6 @@ class MotionPredictor(nn.Module):
 		SEED = 1234567890
 		rng = np.random.RandomState( SEED )
 
-		subject    = 5
 		subaction1 = 1
 		subaction2 = 2
 
@@ -147,7 +146,7 @@ class MotionPredictor(nn.Module):
 		idx.append( rng.randint( 16,T2-prefix-suffix ))
 		return idx
 
-	def get_batch_srnn(self, data, action, device):
+	def get_batch_srnn(self, data, action, subject, device):
 		"""
 		Get a random batch of data from the specified bucket, prepare for step.
 
@@ -167,15 +166,13 @@ class MotionPredictor(nn.Module):
 		  raise ValueError("Unrecognized action {0}".format(action))
 
 		frames = {}
-		frames[action] = self.find_indices_srnn( data, action )
+		frames[action] = self.find_indices_srnn( data, action, subject )
 
 		batch_size     = 8 # we always evaluate 8 sequences
-		subject        = 5 # we always evaluate on subject 5
 		source_seq_len = self.source_seq_len
 		target_seq_len = self.target_seq_len
 
 		seeds = [( action, (i%2)+1, frames[action][i] ) for i in range(batch_size)]
-
 		encoder_inputs  = np.zeros( (batch_size, source_seq_len-1, self.input_size), dtype=float)
 		decoder_inputs  = np.zeros( (batch_size, target_seq_len, self.input_size), dtype=float)
 		decoder_outputs = np.zeros( (batch_size, target_seq_len, self.input_size), dtype=float)
@@ -186,7 +183,6 @@ class MotionPredictor(nn.Module):
 		# Reproducing SRNN's sequence subsequence selection as done in
 		# https://github.com/asheshjain399/RNNexp/blob/master/structural_rnn/CRFProblems/H3.6m/processdata.py#L343
 		for i in range( batch_size ):
-
 			_, subsequence, idx = seeds[i]
 			idx = idx + 50
 
