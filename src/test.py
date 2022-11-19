@@ -67,7 +67,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.info("Train dir: 0"+train_dir)
 os.makedirs(train_dir, exist_ok=True)
 
-def get_srnn_gts( actions, model, test_set, data_mean, data_std, dim_to_ignore, to_euler=True ):
+def get_srnn_gts( actions, model, test_set, subject, data_mean, data_std, dim_to_ignore, to_euler=True ):
 	"""
 	Get the ground truths for srnn's sequences, and convert to Euler angles.
   (the error is always computed in Euler angles).
@@ -89,7 +89,7 @@ def get_srnn_gts( actions, model, test_set, data_mean, data_std, dim_to_ignore, 
 	for action in actions:
 		srnn_gt_euler = []
 		# get_batch or get_batch_srnn
-		_, _, srnn_expmap = model.get_batch_srnn( test_set, action, device)
+		_, _, srnn_expmap = model.get_batch_srnn( test_set, action, subject, device)
 		srnn_expmap = srnn_expmap.cpu()
 		# expmap -> rotmat -> euler
 		for i in np.arange( srnn_expmap.shape[0] ):
@@ -107,11 +107,10 @@ def get_srnn_gts( actions, model, test_set, data_mean, data_std, dim_to_ignore, 
 
 def main():
 	"""Sample predictions for srnn's seeds"""
-	actions  = define_actions( args.action )
-	nsamples = 8
+	actions     = define_actions( args.action )
+	test_subject= 5
 	# === Create the model ===
 	logging.info("Creating a model with {} units.".format(args.size))
-	sampling     = True
 	logging.info("Loading model")
 	model = torch.load(train_dir + '/model_' + str(args.load_model))
 	model.source_seq_len = 50
@@ -124,9 +123,9 @@ def main():
 
 	# === Read and denormalize the gt with srnn's seeds, as we'll need them
 	# many times for evaluation in Euler Angles ===
-	srnn_gts_expmap = get_srnn_gts( actions, model, test_set, data_mean,
+	srnn_gts_expmap = get_srnn_gts( actions, model, test_set, test_subject, data_mean,
 							  data_std, dim_to_ignore, to_euler=False )
-	srnn_gts_euler = get_srnn_gts( actions, model, test_set, data_mean,
+	srnn_gts_euler = get_srnn_gts( actions, model, test_set, test_subject, data_mean,
 							  data_std, dim_to_ignore)
 
 	# Clean and create a new h5 file of samples
@@ -138,23 +137,27 @@ def main():
 
 	# Predict and save for each action
 	for action in actions:
-
+		logging.info("Action {}".format(action))
 		# Make prediction with srnn' seeds
-		encoder_inputs, decoder_inputs, decoder_outputs = model.get_batch_srnn( test_set, action, device)
+		encoder_inputs, decoder_inputs, decoder_outputs = model.get_batch_srnn( test_set, action, test_subject, device)
 		# Forward pass
 		srnn_poses = model(encoder_inputs, decoder_inputs, device)
+
+		print(srnn_poses.shape)
+
 		srnn_loss  = (srnn_poses - decoder_outputs)**2
 		srnn_loss.cpu().data.numpy()
-		srnn_loss = srnn_loss.mean()
+		srnn_loss  = srnn_loss.mean()
 		srnn_poses = srnn_poses.cpu().data.numpy()
 		srnn_poses = srnn_poses.transpose([1,0,2])
-		srnn_loss = srnn_loss.cpu().data.numpy()
+		srnn_loss  = srnn_loss.cpu().data.numpy()
 		# Restores the data in the same format as the original: dimension 99.
 		# Returns a tensor of size (batch_size, seq_length, dim) output.
 		srnn_pred_expmap = revert_output_format(srnn_poses, data_mean, data_std, dim_to_ignore, actions)
+		test_nsequences  = len(srnn_gts_expmap[action])
 		# Save the samples
 		with h5py.File( SAMPLES_FNAME, 'a' ) as hf:
-			for i in np.arange(nsamples):
+			for i in np.arange(test_nsequences):
 				# Save conditioning ground truth
 				node_name = 'expmap/gt/{1}_{0}'.format(i, action)
 				hf.create_dataset( node_name, data=srnn_gts_expmap[action][i] )
